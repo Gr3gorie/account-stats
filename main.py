@@ -115,18 +115,9 @@ def main():
         port=os.environ["POSTGRES_PORT"]
     )
 
-
     print("Getting acts...")
     acts_ip = get_acts_from_sheet("ИП входящие")
     acts_ooo = get_acts_from_sheet("ООО входящие")
-
-    for act in acts_ip:
-        print(act)
-    print(len(acts_ip))
-
-    for act in acts_ooo:
-        print(act)
-    print(len(acts_ooo))
 
     print("Running migrations and inserting data...")
     create_and_insert_into_postgres(conn, "ip_acts", acts_ip)
