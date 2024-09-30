@@ -11,6 +11,7 @@ gspread = "^6.1.2"
 google-auth = "^2.34.0"
 pydantic = "^2.9.2"
 psycopg2-binary = "^2.9.9"
+openpyxl = "^3.1.5"
 
 
 [build-system]
