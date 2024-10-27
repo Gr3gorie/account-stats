@@ -2,6 +2,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from pydantic import BaseModel
 from typing import Optional, List
+from datetime import date, datetime
 import psycopg2
 import os
 
@@ -15,15 +16,36 @@ SERVICE_ACCOUNT_FILE = ''
 
 class Act(BaseModel):
     project_name: Optional[str]
-    current_debt: Optional[str]
-    act_sum: Optional[str]
+    current_debt: Optional[float]
+    act_sum: Optional[float]
     act_number: Optional[str]
     contractor: Optional[str]
     inn: Optional[str]
+    contract_number: Optional[str]
+    created_date: Optional[date]
+    signed_date: Optional[date]
 
 
 creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPE)
 client = gspread.authorize(creds)
+
+
+def parse_currency(value: str) -> Optional[float]:
+    if value:
+        try:
+            return float(value.replace('₽', '').replace(',', '').strip())
+        except ValueError:
+            print(f"Warning: Could not parse currency value '{value}'.")
+    return None
+
+
+def parse_date(value: str) -> Optional[date]:
+    if value:
+        try:
+            return datetime.strptime(value, "%d-%b-%Y").date()
+        except ValueError:
+            print(f"Warning: Could not parse date '{value}'.")
+    return None
 
 
 def get_acts_from_sheet(sheet_name: str) -> List[Act]:
@@ -42,7 +64,7 @@ def get_acts_from_sheet(sheet_name: str) -> List[Act]:
 
         if row[16]:
             if row[16] != current_contractor and not row[0]:
-                current_project_name = None  # or ''
+                current_project_name = None
                 current_inn = None
 
             current_contractor = row[16]
@@ -55,11 +77,14 @@ def get_acts_from_sheet(sheet_name: str) -> List[Act]:
 
         processed_row = Act(
             project_name=current_project_name,
-            current_debt=row[8],
-            act_sum=row[11],
+            current_debt=parse_currency(row[8]),
+            act_sum=parse_currency(row[11]),
             act_number=row[12],
             contractor=current_contractor,
-            inn=current_inn
+            inn=current_inn,
+            contract_number=row[4],
+            created_date=parse_date(row[13]),
+            signed_date=parse_date(row[14])
         )
 
         processed_data.append(processed_row)
@@ -73,20 +98,25 @@ def create_and_insert_into_postgres(conn, table_name: str, acts: List[Act]):
     cur.execute(f"DROP TABLE IF EXISTS {table_name};")
 
     cur.execute(f"""
-        CREATE TABLE {table_name} (
+        CREATE TABLE IF NOT EXISTS {table_name} (
             id SERIAL PRIMARY KEY,
             project_name VARCHAR(255),
-            current_debt VARCHAR(255),
-            act_sum VARCHAR(255),
+            current_debt FLOAT,
+            act_sum FLOAT,
             act_number VARCHAR(255),
             contractor VARCHAR(255),
-            inn VARCHAR(50)
+            inn VARCHAR(50),
+            contract_number VARCHAR(255),
+            created_date DATE,
+            signed_date DATE
         );
     """)
 
     insert_query = f"""
-        INSERT INTO {table_name} (project_name, current_debt, act_sum, act_number, contractor, inn)
-        VALUES (%s, %s, %s, %s, %s, %s);
+        INSERT INTO {table_name} (
+            project_name, current_debt, act_sum, act_number, contractor, inn,
+            contract_number, created_date, signed_date
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
     """
 
     for act in acts:
@@ -96,7 +126,10 @@ def create_and_insert_into_postgres(conn, table_name: str, acts: List[Act]):
             act.act_sum,
             act.act_number,
             act.contractor,
-            act.inn
+            act.inn,
+            act.contract_number,
+            act.created_date,
+            act.signed_date
         )
 
         cur.execute(insert_query, data_tuple)
